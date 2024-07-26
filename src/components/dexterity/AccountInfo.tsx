@@ -1,64 +1,81 @@
+import { FC, useCallback, useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { useProduct, useTrader } from "contexts/DexterityProviders";
-import { FC, useCallback, useEffect } from "react";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { useTrader, useManifest } from "contexts/DexterityProviders";
 import Button from "../Button";
-import { timeSince } from "utils/util";
+import { notify } from "utils/notifications";
+import { dexterity } from "utils/dexterityTypes"; // Adjust this import based on your actual setup
 
 export const AccountInfo: FC = () => {
-    const { selectedProduct } = useProduct()
-    const {
-        trader,
-        cashBalance,
-        setCashBalance,
-        portfolioValue,
-        setPortfolioValue,
-        updated,
-        setUpdated,
-        lastUpdated,
-        setLastUpdated,
-        setOrderData,
-        orderData
-    } = useTrader()
+  const { publicKey } = useWallet();
+  const { manifest, setManifest } = useManifest();
+  const { setTrader } = useTrader();
+  const [trgsArr, setTrgsArr] = useState<any[]>([]);
+  const [selectedTrg, setSelectedTrg] = useState("");
 
-    const updateAccountInfo = useCallback(async () => {
-        if (!trader) return;
+  const mpgPubkey = process.env.NEXT_PUBLIC_MAINNET_MPG;
 
-        // Fetch & Update Trader Account information
+  const fetchTraderAccounts = useCallback(async () => {
+    if (!publicKey) { console.log('publicKey error'); return; }
+    if (!manifest) { console.log('manifest error'); return; }
 
-    }, [trader, selectedProduct]); // Removed markPrice and indexPrice
+    try {
+      const owner = publicKey;
+      const marketProductGroup = new PublicKey(mpgPubkey);
+      const trgs = await manifest.getTRGsOfOwner(owner, marketProductGroup);
+      setTrgsArr(trgs);
+    } catch (error: any) {
+      notify({ type: 'error', message: `Selecting Trader Account failed!`, description: error?.message });
+    }
+  }, [publicKey, manifest, mpgPubkey]);
 
-    useEffect(() => {
+  const handleCreateTRG = useCallback(async () => {
+    try {
+      const marketProductGroup = new PublicKey(mpgPubkey);
+      await manifest.createTrg(marketProductGroup);
+      fetchTraderAccounts();
+    } catch (error: any) {
+      notify({ type: 'error', message: `Creating Trader Account failed!`, description: error?.message });
+    }
+  }, [fetchTraderAccounts, manifest, mpgPubkey]);
 
-        // Stream Trader Account Information
+  const handleSelection = useCallback(async (selectedTrgPubkey: string) => {
+    if (selectedTrgPubkey === "default") return;
 
-    }, [updateAccountInfo]);
+    const trgPubkey = new PublicKey(selectedTrgPubkey);
+    const trader = new dexterity.Trader(manifest, trgPubkey);
 
-    return (
-        <>
-                <div className="border border-white rounded-lg p-4">
-                    <h1 className="text-2xl mb-4">Account Info</h1>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="font-semibold">Cash Balance:</div>
-                        <div>${updated && cashBalance.toLocaleString()}</div>
+    try {
+      await trader.update();
 
-                        <div className="font-semibold">Portfolio Value:</div>
-                        <div>${updated && portfolioValue.toLocaleString()}</div>
+      const marketProductGroup = new PublicKey(mpgPubkey);
+      await manifest.updateOrderbooks(marketProductGroup);
 
-                        <div className="font-semibold">Open Orders:</div>
-                        <div>{orderData && (orderData.length ?? 0)}</div>
+      setTrader(trader);
+      setSelectedTrg(selectedTrgPubkey);
+    } catch (error: any) {
+      notify({ type: 'error', message: `Selecting Trader Account failed!`, description: error?.message });
+    }
+  }, [manifest, mpgPubkey, setTrader]);
 
-                        <div className="font-semibold">Last Updated:</div>
-                        <div>{updated && timeSince(lastUpdated)}</div>
-                    </div>
-                    <Button
-                        text={'↻'}
-                        onClick={updateAccountInfo}
-                        className="w-6 mt-4 bg-gradient-to-br from-[#80ff7d] to-[#80ff7d] hover:from-white hover:to-purple-300 text-black"
-                    />
-                </div>
-        </>
-    );
-}
+  useEffect(() => {
+    fetchTraderAccounts();
+  }, [fetchTraderAccounts]);
 
+  
 
-
+  return (
+    <div>
+      <h2>Select Trader Account</h2>
+      <select onChange={(e) => handleSelection(e.target.value)} value={selectedTrg}>
+        <option value="default">Select TRG</option>
+        {trgsArr.map((trg: any, index: number) => (
+          <option key={index} value={trg.publicKey.toString()}>
+            {trg.publicKey.toString()}
+          </option>
+        ))}
+      </select>
+      <Button onClick={handleCreateTRG} text="Create New TRG" />
+    </div>
+  );
+};
